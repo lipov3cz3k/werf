@@ -359,6 +359,46 @@ RUN --mount=type=bind,from=build,source=/usr/local/test_project/dist,target=/usr
 			}
 		})
 	})
+
+	When("Dockerfile uses run with bind mount from build context", func() {
+		It("should change dockerfile stage digest when bind-mounted file content has changed", func(ctx context.Context) {
+			dockerfile := []byte(`
+FROM alpine:latest
+RUN --mount=type=bind,source=uv.lock,target=uv.lock cat uv.lock
+`)
+
+			ctx = logging.WithLogger(ctx)
+
+			gitRepoStub := NewLocalGitRepoStub("9d8059842b6fde712c58315ca0ab4713d90761c0")
+
+			conveyor := NewConveyorStubForDependencies(NewGiterminismManagerStub(gitRepoStub, NewGiterminismInspectorStub()), nil)
+
+			dockerStages, dockerMetaArgs := testDockerfileToDockerStages(dockerfile)
+
+			stage := newTestFullDockerfileStage(dockerfile, "", nil, dockerStages, dockerMetaArgs, nil, "")
+
+			containerBackend := NewContainerBackendStub()
+
+			img := NewLegacyImageStub()
+			stageBuilder := stage_builder.NewStageBuilder(containerBackend, "", img)
+			stageImage := &StageImage{
+				Image:   img,
+				Builder: stageBuilder,
+			}
+
+			{
+				digest, err := stage.GetDependencies(ctx, conveyor, containerBackend, nil, stageImage, nil)
+				Expect(err).To(Succeed())
+				Expect(digest).NotTo(BeEmpty())
+
+				gitRepoStub.headCommitHash = "23a0884072c0d31b7c42dfaa7f0772cbfa33ec75"
+
+				digest2, err := stage.GetDependencies(ctx, conveyor, containerBackend, nil, stageImage, nil)
+				Expect(err).To(Succeed())
+				Expect(digest2).NotTo(Equal(digest))
+			}
+		})
+	})
 })
 
 type TestDockerfileDependencies struct {

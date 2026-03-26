@@ -561,6 +561,46 @@ func (s *FullDockerfileStage) dockerfileInstructionDependencies(ctx context.Cont
 
 		dependencies = append(dependencies, cDependencies...)
 		onBuildDependencies = append(onBuildDependencies, cOnBuildDependencies...)
+	case *instructions.RunCommand:
+		resolvedValue, err := resolveValueFunc(c.String())
+		if err != nil {
+			return nil, nil, err
+		}
+		dependencies = append(dependencies, resolvedValue)
+
+		preExpandMounts := make([]instructions.Mount, len(instructions.GetMounts(c)))
+		for i, mount := range instructions.GetMounts(c) {
+			preExpandMounts[i] = *mount
+		}
+
+		if err := c.Expand(resolveValueFunc); err != nil {
+			return nil, nil, fmt.Errorf("expand run command mounts: %w", err)
+		}
+
+		var paths []string
+		for _, mount := range instructions.GetMounts(c) {
+			source := mount.Source
+			if source == "" {
+				source = "."
+			}
+			if mount.Type == instructions.MountTypeBind && mount.From == "" {
+				paths = append(paths, source)
+			}
+		}
+
+		for i, mount := range instructions.GetMounts(c) {
+			if i < len(preExpandMounts) {
+				*mount = preExpandMounts[i]
+			}
+		}
+
+		if len(paths) > 0 {
+			checksum, err := s.calculateFilesChecksum(ctx, giterminismManager, paths, c.String())
+			if err != nil {
+				return nil, nil, err
+			}
+			dependencies = append(dependencies, checksum)
+		}
 	case dockerfileInstructionInterface:
 		resolvedValue, err := resolveValueFunc(c.String())
 		if err != nil {
